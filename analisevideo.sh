@@ -1,0 +1,208 @@
+#!/usr/bin/env bash
+# analisevideo — analise VISUAL/cinematografica de video (Gemini) + banco local.
+#
+#   analisevideo.sh analisa <url|path> [slug] [--keep-src] [--prompt "..."]
+#   analisevideo.sh ver     <slug>            # relatorio markdown
+#   analisevideo.sh json    <slug>            # analise crua
+#   analisevideo.sh list    [N]               # ultimas analises
+#   analisevideo.sh search  "<termo>"         # busca no banco
+#   analisevideo.sh stats
+#   analisevideo.sh reindex
+#
+# Nao transcreve fala: quem transcreve e a skill inemavox.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+BANCO="${ANALISEVIDEO_BANCO:-$HOME/projetos/output/analisevideo}"
+INDEX="$BANCO/index.jsonl"
+MAX_H="${ANALISEVIDEO_MAX_H:-480}"   # 480p basta pra ler luz/camera e mantem o upload leve
+mkdir -p "$BANCO"
+
+die() { echo "[analisevideo] erro: $*" >&2; exit 1; }
+
+load_key() {
+  [ -n "${GOOGLE_API_KEY:-}" ] && return 0
+  for f in "$ROOT/.env" "$HOME/projetos/wifi/.env"; do
+    [ -f "$f" ] || continue
+    local v; v="$(grep -m1 '^GOOGLE_API_KEY=' "$f" | cut -d= -f2- | tr -d '"'"'"' \r')"
+    [ -n "$v" ] && { export GOOGLE_API_KEY="$v"; return 0; }
+  done
+  die "GOOGLE_API_KEY nao encontrada (.env do openpcbotv2 ou do wifi)"
+}
+
+slugify() {
+  echo "$1" | iconv -f utf8 -t ascii//TRANSLIT 2>/dev/null || echo "$1"
+}
+
+mk_slug() {
+  local base; base="$(slugify "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//')"
+  base="$(echo "$base" | cut -c1-48)"
+  [ -z "$base" ] && base="video"
+  local s="$base" i=2
+  while [ -d "$BANCO/$s" ]; do s="$base-$i"; i=$((i+1)); done
+  echo "$s"
+}
+
+cmd="${1:-help}"; shift || true
+
+case "$cmd" in
+
+analisa|prep)
+  SRC="${1:-}"; [ -n "$SRC" ] || die "uso: analisa <url|path> [slug]"
+  shift
+  SLUG=""; KEEP=0; EXTRA=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --keep-src) KEEP=1; shift ;;
+      --prompt) EXTRA="$2"; shift 2 ;;
+      -*) shift ;;
+      *) [ -z "$SLUG" ] && SLUG="$1"; shift ;;
+    esac
+  done
+  load_key
+
+  TITULO=""; URL=""; UPLOADER=""; DATA=""
+  if [[ "$SRC" =~ ^https?:// ]]; then
+    URL="$SRC"
+    command -v yt-dlp >/dev/null || die "yt-dlp nao instalado"
+    TITULO="$(yt-dlp --no-warnings --print '%(title)s' --skip-download "$URL" 2>/dev/null | head -1)"
+    UPLOADER="$(yt-dlp --no-warnings --print '%(uploader)s' --skip-download "$URL" 2>/dev/null | head -1)"
+    DATA="$(yt-dlp --no-warnings --print '%(upload_date)s' --skip-download "$URL" 2>/dev/null | head -1)"
+    [ -z "$SLUG" ] && SLUG="$(mk_slug "${TITULO:-video}")"
+    DIR="$BANCO/$SLUG"; mkdir -p "$DIR"
+    echo "[analisevideo] baixando (<=${MAX_H}p)..." >&2
+    yt-dlp --no-warnings --no-playlist \
+      -f "bv*[height<=$MAX_H]+ba/b[height<=$MAX_H]/b" \
+      --merge-output-format mp4 -o "$DIR/fonte.%(ext)s" "$URL" >&2 \
+      || die "download falhou (yt-dlp). Se for site logado, baixe manual e passe o path."
+    FILE="$(ls -1 "$DIR"/fonte.* 2>/dev/null | head -1)"
+  else
+    [ -f "$SRC" ] || die "arquivo nao existe: $SRC"
+    TITULO="$(basename "$SRC")"
+    [ -z "$SLUG" ] && SLUG="$(mk_slug "${TITULO%.*}")"
+    DIR="$BANCO/$SLUG"; mkdir -p "$DIR"
+    FILE="$DIR/fonte.${SRC##*.}"
+    cp -f "$SRC" "$FILE"
+  fi
+  [ -f "${FILE:-}" ] || die "nao achei o arquivo baixado"
+
+  DUR="$(ffprobe -v quiet -show_entries format=duration -of csv=p=0 "$FILE" 2>/dev/null | cut -d. -f1)"
+  [ -z "$DUR" ] && DUR=0
+  RES="$(ffprobe -v quiet -select_streams v:0 -show_entries stream=width,height,r_frame_rate -of csv=p=0:s=x "$FILE" 2>/dev/null | head -1)"
+  BYTES="$(stat -c%s "$FILE")"
+
+  # >18MB tende a estourar tempo/limite: reencoda menor antes de mandar.
+  ENVIA="$FILE"
+  if [ "$BYTES" -gt 18874368 ]; then
+    echo "[analisevideo] arquivo grande (${BYTES}B), comprimindo pra analise..." >&2
+    ENVIA="$DIR/analise-src.mp4"
+    ffmpeg -y -v error -i "$FILE" -vf "scale=-2:360" -r 12 -c:v libx264 -crf 30 -preset veryfast \
+      -c:a aac -b:a 64k "$ENVIA" </dev/null >&2 || ENVIA="$FILE"
+  fi
+
+  # titulo vem de fora (aspas, acentos, barras): so por argv, nunca interpolado.
+  python3 - "$DIR/meta.json" "$SLUG" "$TITULO" "$URL" "$UPLOADER" "$DATA" "$DUR" "$RES" "$BYTES" "$FILE" <<'PY'
+import json, sys
+_, dest, slug, titulo, url, canal, data, dur, res, bytes_, arq = sys.argv
+json.dump({
+  "slug": slug, "titulo": titulo, "url": url, "canal": canal,
+  "data_publicacao": data, "duracao_s": int(dur or 0), "resolucao": res,
+  "bytes": int(bytes_ or 0), "arquivo": arq,
+}, open(dest, "w"), ensure_ascii=False, indent=2)
+PY
+
+  echo "[analisevideo] analisando com Gemini (${DUR}s)..." >&2
+  export ANALISEVIDEO_EXTRA="$EXTRA"
+  if ! python3 "$HERE/analisa.py" "$ENVIA" "$DUR" "$DIR/meta.json" > "$DIR/analise.json"; then
+    cat "$DIR/analise.json" >&2
+    die "analise falhou"
+  fi
+  python3 "$HERE/relatorio.py" "$DIR/analise.json" "$SLUG" > "$DIR/analise.md" || die "relatorio falhou"
+
+  # banco pesquisavel: uma linha por analise
+  python3 - "$DIR/analise.json" "$DIR/meta.json" "$INDEX" <<'PY'
+import json, sys, datetime
+a = json.load(open(sys.argv[1])); m = json.load(open(sys.argv[2]))
+au = a.get("audio") or {}; f = a.get("fotografia") or {}; mo = a.get("montagem") or {}
+row = {
+  "slug": m.get("slug"), "titulo": m.get("titulo"), "url": m.get("url"),
+  "canal": m.get("canal"), "duracao_s": m.get("duracao_s"),
+  "quando": datetime.datetime.now().isoformat(timespec="seconds"),
+  "tipo": a.get("tipo"), "resumo": a.get("resumo"),
+  "look": f.get("look"), "paleta": f.get("paleta"),
+  "movimentos": sorted({c.get("movimento") for c in (a.get("camera") or []) if c.get("movimento")}),
+  "ritmo": mo.get("ritmo"), "cortes_por_minuto": mo.get("cortes_por_minuto"),
+  "musica": au.get("genero"), "bpm": au.get("bpm_aprox"), "mood": au.get("mood"),
+  "tags": a.get("tags"), "referencias": a.get("referencias_estilo"),
+}
+with open(sys.argv[3], "a") as fh:
+    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+PY
+
+  if [ "$KEEP" != 1 ]; then
+    [ "$ENVIA" != "$FILE" ] && rm -f "$ENVIA"
+    rm -f "$FILE"
+    # o meta nao pode apontar pra um arquivo que acabou de ser apagado
+    tmp="$(mktemp)"; jq '.arquivo = null' "$DIR/meta.json" > "$tmp" && mv "$tmp" "$DIR/meta.json"
+  fi
+  echo "[analisevideo] pronto: $SLUG"
+  echo "$DIR/analise.md"
+  ;;
+
+ver)
+  S="${1:?ver <slug>}"; cat "$BANCO/$S/analise.md" ;;
+
+json)
+  S="${1:?json <slug>}"; cat "$BANCO/$S/analise.json" ;;
+
+list)
+  N="${1:-15}"
+  [ -f "$INDEX" ] || { echo "banco vazio ($BANCO)"; exit 0; }
+  tail -n "$N" "$INDEX" | jq -r '"\(.quando[0:16])  \(.slug)  [\(.tipo // "-")]  \(.titulo // "")"'
+  ;;
+
+search)
+  Q="${1:?search \"<termo>\"}"
+  [ -f "$INDEX" ] || { echo "banco vazio"; exit 0; }
+  jq -c --arg q "$(echo "$Q" | tr '[:upper:]' '[:lower:]')" \
+    'select((tostring | ascii_downcase) | contains($q))' "$INDEX" \
+    | jq -r '"\(.slug)  [\(.tipo // "-")] \(.titulo // "")\n   \(.resumo // "" | .[0:160])\n   tags: \(.tags // [] | join(", "))"'
+  ;;
+
+stats)
+  [ -f "$INDEX" ] || { echo "banco vazio ($BANCO)"; exit 0; }
+  echo "banco: $BANCO"
+  echo "analises: $(wc -l < "$INDEX")"
+  echo "-- tipos:";       jq -r '.tipo // "-"' "$INDEX" | sort | uniq -c | sort -rn | head
+  echo "-- movimentos:";  jq -r '.movimentos[]?' "$INDEX" | sort | uniq -c | sort -rn | head
+  echo "-- tags:";        jq -r '.tags[]?' "$INDEX" | sort | uniq -c | sort -rn | head -15
+  ;;
+
+reindex)
+  : > "$INDEX"
+  for d in "$BANCO"/*/; do
+    [ -f "$d/analise.json" ] && [ -f "$d/meta.json" ] || continue
+    python3 - "$d/analise.json" "$d/meta.json" "$INDEX" <<'PY'
+import json, sys, datetime, os
+a = json.load(open(sys.argv[1])); m = json.load(open(sys.argv[2]))
+au = a.get("audio") or {}; f = a.get("fotografia") or {}; mo = a.get("montagem") or {}
+row = {"slug": m.get("slug"), "titulo": m.get("titulo"), "url": m.get("url"),
+  "canal": m.get("canal"), "duracao_s": m.get("duracao_s"),
+  "quando": datetime.datetime.fromtimestamp(os.path.getmtime(sys.argv[1])).isoformat(timespec="seconds"),
+  "tipo": a.get("tipo"), "resumo": a.get("resumo"), "look": f.get("look"),
+  "paleta": f.get("paleta"),
+  "movimentos": sorted({c.get("movimento") for c in (a.get("camera") or []) if c.get("movimento")}),
+  "ritmo": mo.get("ritmo"), "cortes_por_minuto": mo.get("cortes_por_minuto"),
+  "musica": au.get("genero"), "bpm": au.get("bpm_aprox"), "mood": au.get("mood"),
+  "tags": a.get("tags"), "referencias": a.get("referencias_estilo")}
+open(sys.argv[3], "a").write(json.dumps(row, ensure_ascii=False) + "\n")
+PY
+  done
+  echo "reindexado: $(wc -l < "$INDEX") analises"
+  ;;
+
+*)
+  sed -n '2,20p' "$0" | sed 's/^# \?//'
+  ;;
+esac
