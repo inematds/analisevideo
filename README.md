@@ -4,7 +4,7 @@ Análise **visual e cinematográfica** de vídeo com o Gemini, arquivada num ban
 local pesquisável. Não é transcrição de fala: o que sai daqui é o que um diretor
 de fotografia, um montador e um produtor musical enxergam no material.
 
-Roda como skill do [OpenPCBot](https://github.com/NeiMaldaner/openpcbotv2) sob o
+Roda como skill do [OpenPCBot](https://github.com/inematds/openpcbotv2) sob o
 comando `/analisevideo` — de propósito **não dispara por vibe** (link solto ou
 "analisa esse vídeo" continuam indo pro inemaVOX).
 
