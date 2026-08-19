@@ -8,6 +8,10 @@ Roda como skill do [OpenPCBot](https://github.com/inematds/openpcbotv2) sob o
 comando `/analisevideo` — de propósito **não dispara por vibe** (link solto ou
 "analisa esse vídeo" continuam indo pro inemaVOX).
 
+## 📖 Guia de uso
+
+Guia completo (landing + passo a passo): **https://inematds.github.io/analisevideo/guia/**
+
 ## Uso
 
 ```bash
