@@ -21,6 +21,7 @@ S=/home/nmaldaner/projetos/openpcbotv2/skills/analisevideo/analisevideo.sh
 bash $S analisa <url|path> [slug] [--keep-src]   # baixa (yt-dlp), analisa, grava no banco
 bash $S ver     <slug>        # relatorio markdown (o que mandar no Telegram)
 bash $S json    <slug>        # analise crua
+bash $S prompts <slug>        # 1 prompt por cena (5-10) pro gerador de video
 bash $S list    [N]           # ultimas analises
 bash $S search  "<termo>"     # busca no banco (tag, look, movimento, genero, titulo)
 bash $S stats                 # o que mais aparece no banco
@@ -39,7 +40,9 @@ camera bloco a bloco com timecode (plano, angulo, movimento, velocidade),
 composicao, montagem (cortes/min, ritmo, transicoes, corte no beat),
 audio (genero, bpm, instrumentacao, mood, sfx, mixagem), texto e grafismo,
 pos-producao, narrativa (gancho de 3s, arco, CTA), `reproduzir` (passos +
-prompt pronto pra Kling/Veo/Seedance) e tags.
+`prompts_gerador_video`: 5 a 10 prompts, UM POR CENA com timecode e negative
+prompt, pra Kling/Veo/Seedance — `prompt_gerador_video` segue existindo com o
+melhor deles) e tags.
 
 ## Fluxo no bot
 

@@ -97,7 +97,23 @@ def main() -> int:
     o.append(f"- Equipamento: {lista(r.get('equipamento_minimo'))}")
     for i, passo in enumerate(r.get("passos") or [], 1):
         o.append(f"{i}. {passo}")
-    if r.get("prompt_gerador_video"):
+    cenas = r.get("prompts_gerador_video") or []
+    if cenas:
+        o.append(f"\n## Prompts p/ gerador de video ({len(cenas)} cenas)")
+        for i, c in enumerate(cenas, 1):
+            n = c.get("cena", i)
+            janela = f"{c.get('t_inicio', '?')}–{c.get('t_fim', '?')}"
+            dur = c.get("duracao_s")
+            cab = f"\n### Cena {n} · {janela}"
+            if dur:
+                cab += f" · ~{dur}s"
+            if c.get("titulo"):
+                cab += f" — {c['titulo']}"
+            o.append(cab)
+            o.append(f"> {c.get('prompt', '-')}")
+            if c.get("negativo"):
+                o.append(f"\nNegativo: `{c['negativo']}`")
+    elif r.get("prompt_gerador_video"):
         o.append("\nPrompt p/ gerador de video:")
         o.append(f"> {r['prompt_gerador_video']}")
 

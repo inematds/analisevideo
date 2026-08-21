@@ -156,6 +156,29 @@ ver)
 json)
   S="${1:?json <slug>}"; cat "$BANCO/$S/analise.json" ;;
 
+prompts)
+  S="${1:?prompts <slug>}"
+  A="$BANCO/$S/analise.json"; [ -f "$A" ] || die "sem analise: $S"
+  python3 - "$A" <<'PY2'
+import json, sys
+a = json.load(open(sys.argv[1]))
+r = a.get("reproduzir") or {}
+cenas = r.get("prompts_gerador_video") or []
+if not cenas:
+    p = r.get("prompt_gerador_video")
+    print(p or "(sem prompts nesta analise — rode 'analisa' de novo)")
+    raise SystemExit(0)
+for i, c in enumerate(cenas, 1):
+    d = f" ~{c['duracao_s']}s" if c.get("duracao_s") else ""
+    print(f"--- Cena {c.get('cena', i)} [{c.get('t_inicio','?')}-{c.get('t_fim','?')}]{d} "
+          f"{c.get('titulo','')}".rstrip())
+    print(c.get("prompt", "").strip())
+    if c.get("negativo"):
+        print(f"negative: {c['negativo']}")
+    print()
+PY2
+  ;;
+
 list)
   N="${1:-15}"
   [ -f "$INDEX" ] || { echo "banco vazio ($BANCO)"; exit 0; }

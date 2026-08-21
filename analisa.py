@@ -56,8 +56,25 @@ Campos obrigatorios:
 - narrativa: {gancho_primeiros_3s, estrutura, arco, cta, ritmo_de_informacao}
 - reproduzir: {dificuldade: "facil|media|dificil",
   equipamento_minimo: [], passos: [5 a 10 passos praticos para refazer],
-  prompt_gerador_video: "prompt em ingles para Kling/Veo/Seedance que
-  reproduza o look e o movimento de camera do trecho mais forte"}
+  prompt_gerador_video: "prompt em ingles do trecho mais forte (o melhor da
+  lista abaixo, repetido aqui por compatibilidade)",
+  prompts_gerador_video: [
+    NO MINIMO 5 e no maximo 10 itens — UM PROMPT POR CENA, cobrindo o video
+    do inicio ao fim (nao so o comeco), cada um
+    {cena: int (1,2,3...), t_inicio: "mm:ss", t_fim: "mm:ss",
+     titulo: "rotulo curto em pt-BR da cena",
+     prompt: "prompt EM INGLES, 40 a 80 palavras, pronto pra colar em
+       Kling/Veo/Seedance. Deve conter, nesta ordem: sujeito e acao;
+       enquadramento e angulo; movimento de camera e velocidade; lente/DOF;
+       luz e hora do dia; paleta com as cores em hex; look/grade e textura
+       (grain, halation); ambiente e cenario; duracao aproximada do plano.
+       Autocontido: nao escreva 'mesma cena anterior' nem cite outras cenas.",
+     negativo: "negative prompt curto em ingles (o que evitar)",
+     duracao_s: number (duracao do plano em segundos)}
+  ]}
+  As cenas devem ser derivadas dos blocos de 'camera' / dos cortes reais.
+  Se o video tiver menos de 5 cortes, quebre em 5 momentos distintos
+  (abertura, desenvolvimento, pico, virada, fechamento).
 - referencias_estilo: [ate 5 referencias de diretor/canal/filme/estetica]
 - tags: 8 a 15 tags curtas em pt-BR para busca posterior.
 - confianca: 0..1 quao seguro voce esta da analise (video curto/escuro baixa).
@@ -142,7 +159,7 @@ def main() -> int:
     body = {
         "contents": [{"parts": [{"text": PROMPT + "\n\n" + ctx}, part]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3,
-                             "maxOutputTokens": 8192},
+                             "maxOutputTokens": 16384},
     }
     req = urllib.request.Request(
         f"{API}/v1beta/models/{MODEL}:generateContent?key={key}",

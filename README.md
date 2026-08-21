@@ -20,6 +20,7 @@ S=~/projetos/analisevideo/analisevideo.sh
 bash $S analisa <url|arquivo> [slug] [--keep-src] [--prompt "..."]
 bash $S ver     <slug>       # relatório markdown
 bash $S json    <slug>       # análise crua
+bash $S prompts <slug>       # 1 prompt por cena (5–10), pronto pra Kling/Veo/Seedance
 bash $S list    [N]          # últimas análises
 bash $S search  "<termo>"    # busca no banco
 bash $S stats                # o que mais aparece no banco
@@ -31,6 +32,8 @@ Precisa de `yt-dlp`, `ffmpeg`/`ffprobe`, `jq`, `python3` e uma `GOOGLE_API_KEY`
 
 ## O que a análise cobre
 
+- **Prompts por cena** — 5 a 10 prompts em inglês (+ negative prompt), um por
+  cena com timecode, cobrindo o vídeo inteiro.
 - **Fotografia** — paleta em hex, esquema de luz, temperatura, contraste, look,
   lente aparente, profundidade de campo, textura/grain.
 - **Câmera bloco a bloco** com timecode — plano, ângulo, movimento (pan, dolly,
