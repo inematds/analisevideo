@@ -167,15 +167,26 @@ def main() -> int:
         headers={"Content-Type": "application/json"},
     )
     # 429/500/503 do Gemini sao rotina em horario de pico: tenta de novo.
+    #
+    # A espera era 5s, 10s, 15s — 30 segundos no total, que devolve o pedido
+    # para dentro da MESMA congestao. Em 2026-08-22 uma analise morreu assim
+    # (job 4775, `HTTP Error 503: Service Unavailable`) depois de ja ter baixado
+    # 22 MB e comprimido o video: o trabalho caro estava feito e o que faltava
+    # era esperar. Agora sao seis tentativas com espera longa (20s a 2 min,
+    # ~6 min no total) — poucas e espacadas, em vez de muitas e juntas.
+    ESPERAS = (20, 40, 60, 90, 120)
     raw = None
-    for tentativa in range(4):
+    for tentativa in range(len(ESPERAS) + 1):
         try:
             with urllib.request.urlopen(req, timeout=900) as r:
                 raw = json.load(r)["candidates"][0]["content"]["parts"][0]["text"]
             break
         except urllib.error.HTTPError as e:
-            if e.code in (429, 500, 502, 503) and tentativa < 3:
-                time.sleep(5 * (tentativa + 1))
+            if e.code in (429, 500, 502, 503) and tentativa < len(ESPERAS):
+                espera = ESPERAS[tentativa]
+                print(f"[analisevideo] Gemini {e.code} — esperando {espera}s "
+                      f"(tentativa {tentativa + 1}/{len(ESPERAS) + 1})", file=sys.stderr, flush=True)
+                time.sleep(espera)
                 continue
             raise
     out = json.loads(raw)
