@@ -64,3 +64,30 @@ apagado no fim (guarde com `--keep-src`).
 - Link que o yt-dlp não pega (site logado): baixe por fora e passe o caminho.
 - Vídeo longo (>15 min) fica caro e vago — prefira analisar um trecho.
 - 429/500/503 do Gemini são reprocessados automaticamente (4 tentativas).
+
+## Chaves do Gemini — três, e ele troca sozinho
+
+O `analisa.py` tenta as chaves nesta ordem, parando na primeira que funcionar:
+
+| variável | onde |
+|---|---|
+| `GOOGLE_API_KEY` | a de sempre |
+| `GEMINI_API_KEY` | idem (deduplicada se for o mesmo valor) |
+| `GEMINI_API_KEY_INEMACCBOT_TIME` | `projects/1056030032122` |
+| `GEMINI_API_KEY_INEMACCBOT_PROMPTS` | `projects/1000152753819` |
+
+Todas saem de `~/projetos/wifi/.env` (ou do `.env` local).
+
+**O que faz trocar e o que faz esperar** — a distinção é o ponto:
+
+- **429 (cota) e 403 (bloqueada)** → passa para a chave seguinte **na hora**. Ela
+  está em outro projeto, com cota própria; esperar não resolveria nada.
+- **500 / 502 / 503** → é o Gemini congestionado. A chave não tem culpa, e trocar
+  não ajuda: espera (20s, 40s, 60s, 90s, 120s) e insiste na mesma.
+
+O upload do arquivo grande também entra nessa conta: um 429 nele troca de chave
+em vez de virar erro final — é justamente o caso em que o vídeo já foi baixado e
+comprimido, e perder tudo ali seria caro.
+
+Quando usa uma chave que não é a primeira, ele diz qual, no stderr. Se todas
+falharem por cota, o erro lista **quais** falharam, em vez de um "deu erro".

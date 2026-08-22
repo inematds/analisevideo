@@ -130,6 +130,91 @@ def upload(key: str, path: str, mime: str) -> str:
     return uri
 
 
+# ORDEM das chaves. A primeira é a de sempre; as outras existem porque estão em
+# PROJETOS diferentes — cota estourada num projeto não estoura no outro.
+NOMES_CHAVE = ("GOOGLE_API_KEY", "GEMINI_API_KEY",
+               "GEMINI_API_KEY_INEMACCBOT_TIME", "GEMINI_API_KEY_INEMACCBOT_PROMPTS")
+
+# 429 = cota; 403 = chave bloqueada/restrita. Nos dois casos OUTRA chave resolve,
+# e esperar não resolve nada — é aqui que a redundância vale.
+TROCA_DE_CHAVE = (429, 403)
+# 5xx é o Gemini congestionado: a chave não tem culpa e trocar não ajuda. Espera.
+ESPERA_E_TENTA = (500, 502, 503)
+
+
+def chaves_disponiveis() -> list:
+    """As chaves na ordem, sem repetir valor.
+
+    Deduplica pelo VALOR, não pelo nome: `GOOGLE_API_KEY` e `GEMINI_API_KEY`
+    costumam apontar para a mesma chave, e tentar duas vezes a mesma coisa
+    depois de um 429 é só perder tempo.
+    """
+    saida, vistos = [], set()
+    for nome in NOMES_CHAVE:
+        v = (os.environ.get(nome) or "").strip()
+        if v and v not in vistos:
+            vistos.add(v)
+            saida.append((nome, v))
+    return saida
+
+
+class CotaOuBloqueio(Exception):
+    """A chave nao serve AGORA (cota ou bloqueio). Trocar de chave resolve."""
+
+    def __init__(self, codigo: int):
+        super().__init__(f"HTTP {codigo}")
+        self.codigo = codigo
+
+
+def tentar_com(key: str, path: str, mime: str, size: int, ctx: str, esperas) -> str:
+    """Upload (se preciso) + geracao, com UMA chave.
+
+    O upload entra aqui dentro de proposito: o arquivo enviado pertence ao
+    PROJETO da chave, entao trocar de chave obriga a subir de novo — reaproveitar
+    o `file_uri` da chave anterior daria 403 na geracao.
+    """
+    if size <= INLINE_LIMIT:
+        part = {"inline_data": {"mime_type": mime,
+                                "data": base64.b64encode(open(path, "rb").read()).decode()}}
+    else:
+        # O upload tambem recusa por cota/bloqueio — e é ele que gasta o tempo
+        # do arquivo grande. Sem converter aqui, um 429 no upload viraria erro
+        # final em vez de troca de chave.
+        try:
+            uri = upload(key, path, mime)
+        except urllib.error.HTTPError as e:
+            if e.code in TROCA_DE_CHAVE:
+                raise CotaOuBloqueio(e.code) from e
+            raise
+        part = {"file_data": {"mime_type": mime, "file_uri": uri}}
+    body = {
+        "contents": [{"parts": [{"text": PROMPT + "\n\n" + ctx}, part]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3,
+                             "maxOutputTokens": 16384},
+    }
+    for tentativa in range(len(esperas) + 1):
+        req = urllib.request.Request(
+            f"{API}/v1beta/models/{MODEL}:generateContent?key={key}",
+            data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=900) as r:
+                return json.load(r)["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError as e:
+            if e.code in TROCA_DE_CHAVE:
+                raise CotaOuBloqueio(e.code) from e
+            if e.code in ESPERA_E_TENTA and tentativa < len(esperas):
+                espera = esperas[tentativa]
+                print(f"[analisevideo] Gemini {e.code} — esperando {espera}s "
+                      f"(tentativa {tentativa + 1}/{len(esperas) + 1})",
+                      file=sys.stderr, flush=True)
+                time.sleep(espera)
+                continue
+            raise
+    raise RuntimeError("Gemini nao respondeu depois de todas as esperas")
+
+
 def main() -> int:
     path = sys.argv[1]
     dur = float(sys.argv[2] or 0)
@@ -137,58 +222,49 @@ def main() -> int:
     if len(sys.argv) > 3 and os.path.exists(sys.argv[3]):
         meta = json.load(open(sys.argv[3]))
 
-    key = os.environ.get("GOOGLE_API_KEY")
-    if not key:
-        print(json.dumps({"erro": "GOOGLE_API_KEY ausente"}))
+    chaves = chaves_disponiveis()
+    if not chaves:
+        print(json.dumps({"erro": "nenhuma chave do Gemini encontrada "
+                                  "(GOOGLE_API_KEY, GEMINI_API_KEY, GEMINI_API_KEY_*)"}))
         return 1
 
     mime = mimetypes.guess_type(path)[0] or "video/mp4"
     size = os.path.getsize(path)
-    if size <= INLINE_LIMIT:
-        part = {"inline_data": {
-            "mime_type": mime,
-            "data": base64.b64encode(open(path, "rb").read()).decode(),
-        }}
-    else:
-        part = {"file_data": {"mime_type": mime, "file_uri": upload(key, path, mime)}}
 
     ctx = f"Duracao do video: {dur:.0f}s. Titulo: {meta.get('titulo') or os.path.basename(path)}."
     extra = os.environ.get("ANALISEVIDEO_EXTRA", "").strip()
     if extra:
         ctx += "\nPedido especifico do usuario (responda tambem em 'pedido_extra'): " + extra
-    body = {
-        "contents": [{"parts": [{"text": PROMPT + "\n\n" + ctx}, part]}],
-        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.3,
-                             "maxOutputTokens": 16384},
-    }
-    req = urllib.request.Request(
-        f"{API}/v1beta/models/{MODEL}:generateContent?key={key}",
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    # 429/500/503 do Gemini sao rotina em horario de pico: tenta de novo.
-    #
-    # A espera era 5s, 10s, 15s — 30 segundos no total, que devolve o pedido
-    # para dentro da MESMA congestao. Em 2026-08-22 uma analise morreu assim
-    # (job 4775, `HTTP Error 503: Service Unavailable`) depois de ja ter baixado
-    # 22 MB e comprimido o video: o trabalho caro estava feito e o que faltava
-    # era esperar. Agora sao seis tentativas com espera longa (20s a 2 min,
-    # ~6 min no total) — poucas e espacadas, em vez de muitas e juntas.
+
+    # 5xx do Gemini sao rotina em horario de pico: tenta de novo, com a MESMA
+    # chave. A espera era 5s, 10s, 15s — 30 segundos no total, que devolve o
+    # pedido para dentro da MESMA congestao. Em 2026-08-22 uma analise morreu
+    # assim (job 4775, 503) depois de ja ter baixado 22 MB e comprimido o video:
+    # o trabalho caro estava feito e o que faltava era esperar.
     ESPERAS = (20, 40, 60, 90, 120)
+
     raw = None
-    for tentativa in range(len(ESPERAS) + 1):
+    usada = None
+    falhas = []
+    for nome, key in chaves:
         try:
-            with urllib.request.urlopen(req, timeout=900) as r:
-                raw = json.load(r)["candidates"][0]["content"]["parts"][0]["text"]
+            raw = tentar_com(key, path, mime, size, ctx, ESPERAS)
+            usada = nome
             break
-        except urllib.error.HTTPError as e:
-            if e.code in (429, 500, 502, 503) and tentativa < len(ESPERAS):
-                espera = ESPERAS[tentativa]
-                print(f"[analisevideo] Gemini {e.code} — esperando {espera}s "
-                      f"(tentativa {tentativa + 1}/{len(ESPERAS) + 1})", file=sys.stderr, flush=True)
-                time.sleep(espera)
-                continue
-            raise
+        except CotaOuBloqueio as e:
+            # NAO espera: a proxima chave esta em outro projeto, e a cota de la
+            # nao foi tocada. Esperar aqui seria pagar o tempo sem necessidade.
+            falhas.append(f"{nome}: HTTP {e.codigo}")
+            print(f"[analisevideo] {nome} recusou (HTTP {e.codigo}) — "
+                  f"tentando a proxima chave", file=sys.stderr, flush=True)
+            continue
+    if raw is None:
+        print(json.dumps({"erro": "todas as chaves do Gemini falharam por cota ou "
+                                  "bloqueio — " + "; ".join(falhas)}, ensure_ascii=False))
+        return 1
+    if usada != chaves[0][0]:
+        print(f"[analisevideo] analise feita com {usada}", file=sys.stderr, flush=True)
+
     out = json.loads(raw)
     out["_fonte"] = meta
     out["_modelo"] = MODEL

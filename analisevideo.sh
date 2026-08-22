@@ -21,14 +21,25 @@ mkdir -p "$BANCO"
 
 die() { echo "[analisevideo] erro: $*" >&2; exit 1; }
 
+# Exporta TODAS as chaves do Gemini que existirem, nao so a primeira.
+#
+# O analisa.py tenta uma a uma: cota estourada (429) ou chave bloqueada (403)
+# faz ele passar para a proxima, que esta em outro PROJETO e por isso tem cota
+# propria. Carregar so uma aqui anularia essa rede — foi por isso que a lista
+# saiu do shell e virou responsabilidade do Python.
+CHAVES_GEMINI="GOOGLE_API_KEY GEMINI_API_KEY GEMINI_API_KEY_INEMACCBOT_TIME GEMINI_API_KEY_INEMACCBOT_PROMPTS"
+
 load_key() {
-  [ -n "${GOOGLE_API_KEY:-}" ] && return 0
-  for f in "$ROOT/.env" "$HOME/projetos/wifi/.env"; do
-    [ -f "$f" ] || continue
-    local v; v="$(grep -m1 '^GOOGLE_API_KEY=' "$f" | cut -d= -f2- | tr -d '"'"'"' \r')"
-    [ -n "$v" ] && { export GOOGLE_API_KEY="$v"; return 0; }
+  local achou=0 nome v f
+  for nome in $CHAVES_GEMINI; do
+    [ -n "$(eval echo "\${$nome:-}")" ] && { achou=1; continue; }
+    for f in "$ROOT/.env" "$HOME/projetos/wifi/.env"; do
+      [ -f "$f" ] || continue
+      v="$(grep -m1 "^$nome=" "$f" | cut -d= -f2- | tr -d '"'"'"' \r')"
+      [ -n "$v" ] && { export "$nome=$v"; achou=1; break; }
+    done
   done
-  die "GOOGLE_API_KEY nao encontrada (.env do openpcbotv2 ou do wifi)"
+  [ "$achou" = 1 ] || die "nenhuma chave do Gemini encontrada (.env do openpcbotv2 ou do wifi)"
 }
 
 slugify() {
