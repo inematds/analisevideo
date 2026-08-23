@@ -48,8 +48,15 @@ Campos obrigatorios:
   jump_cut: bool, corte_no_beat: bool, uso_de_slowmo_speedramp}
 - movimento_no_quadro: como sujeito/objetos se movem, blocking.
 - audio: {tem_musica: bool, genero, subgenero, bpm_aprox: int, tonalidade_aprox,
-  instrumentacao: [], mood, energia: "baixa|media|alta", estrutura_musical,
-  sfx: [], mixagem (voz x musica x ambiencia), sincronia_com_a_imagem}
+  instrumentacao: [], mood, energia: "baixa|media|alta",
+  estrutura_musical: "secoes com timecode, ex 'intro 00:00-00:04, build ate
+    00:11, drop 00:11-00:22, outro'",
+  sfx: [], mixagem (voz x musica x ambiencia), sincronia_com_a_imagem,
+  prompt_musica: "prompt EM INGLES, 30 a 60 palavras, pronto pra colar em
+    Suno/Udio/ElevenLabs Music, descrevendo genero, bpm, tonalidade,
+    instrumentacao, mood, arco de energia e uso (trilha de reel etc).
+    Autocontido, sem citar o video original nem artista real.",
+  negativo_musica: "negative prompt curto em ingles (o que evitar na trilha)"}
 - texto_e_grafismo: {tem_texto: bool, estilo_tipografico, familia_aproximada,
   animacao_do_texto, legendas_estilo, lower_thirds, motion_graphics: []}
 - pos_producao: {efeitos: [], vfx, estabilizacao, lut_sugerida, sound_design}

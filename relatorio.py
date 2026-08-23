@@ -73,7 +73,13 @@ def main() -> int:
     o.append(f"- Instrumentacao: {lista(au.get('instrumentacao'))}")
     o.append(f"- Mood/energia: {au.get('mood', '-')} · {au.get('energia', '-')}")
     o.append(f"- SFX: {lista(au.get('sfx'))}")
+    o.append(f"- Estrutura: {au.get('estrutura_musical', '-')}")
     o.append(f"- Mixagem: {au.get('mixagem', '-')} · sincronia: {au.get('sincronia_com_a_imagem', '-')}")
+    if au.get("prompt_musica"):
+        o.append("\n**Prompt de musica (Suno/Udio):**")
+        o.append(f"```\n{au['prompt_musica']}\n```")
+        if au.get("negativo_musica"):
+            o.append(f"Negativo: `{au['negativo_musica']}`")
 
     t = a.get("texto_e_grafismo") or {}
     o.append("\n## Texto e grafismo")
