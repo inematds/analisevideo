@@ -91,3 +91,20 @@ comprimido, e perder tudo ali seria caro.
 
 Quando usa uma chave que não é a primeira, ele diz qual, no stderr. Se todas
 falharem por cota, o erro lista **quais** falharam, em vez de um "deu erro".
+
+
+## Sites que exigem sessão (Facebook, Instagram, TikTok, YouTube)
+
+O `yt-dlp` cru é recusado pelo Facebook com `Cannot parse data` — não é versão
+velha nem falta de `--impersonate` (os dois foram testados em 2026-08-24 e
+falharam igual). É **sessão**: com os cookies do Firefox o mesmo link lista os
+formatos e baixa em 7 segundos.
+
+O script acha o perfil sozinho (o primeiro com `cookies.sqlite`, procurando no
+`snap` primeiro) e só acrescenta as flags nesses domínios. Para forçar outro
+perfil:
+
+    export ANALISEVIDEO_FIREFOX_PROFILE=~/snap/firefox/common/.mozilla/firefox/xxxx.default
+
+**Sem Firefox na máquina** (VPS), o download segue sem cookies e avisa no stderr
+— para os sites públicos continua funcionando.
