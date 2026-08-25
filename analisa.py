@@ -218,6 +218,21 @@ def tentar_com(key: str, path: str, mime: str, size: int, ctx: str, esperas) -> 
                       file=sys.stderr, flush=True)
                 time.sleep(espera)
                 continue
+            # 5xx ESGOTADO vira troca de chave, e nao erro final.
+            #
+            # O comentario aqui dizia "a chave nao tem culpa e trocar nao ajuda"
+            # — e isso e falso, medido em 2026-08-24: no mesmo minuto,
+            # GOOGLE_API_KEY e GEMINI_API_KEY responderam e as duas
+            # GEMINI_API_KEY_INEMACCBOT_* devolveram 503 ("This model is
+            # currently experiencing high demand"). O 503 do Gemini e por
+            # PROJETO, nao global.
+            #
+            # Foi o que matou os jobs 5156, 5158 e 5159: a primeira chave estava
+            # em 429 (cota), a segunda caiu em 503, o codigo insistiu 6 vezes
+            # com ELA (5,5 min de espera) e desistiu — com duas chaves boas na
+            # lista, nunca tentadas, e o video ja baixado e comprimido.
+            if e.code in ESPERA_E_TENTA:
+                raise CotaOuBloqueio(e.code) from e
             raise
     raise RuntimeError("Gemini nao respondeu depois de todas as esperas")
 
@@ -259,8 +274,10 @@ def main() -> int:
             usada = nome
             break
         except CotaOuBloqueio as e:
-            # NAO espera: a proxima chave esta em outro projeto, e a cota de la
-            # nao foi tocada. Esperar aqui seria pagar o tempo sem necessidade.
+            # NAO espera: a proxima chave esta em outro projeto, e a cota (e a
+            # fila) de la nao foram tocadas. Esperar aqui seria pagar o tempo
+            # sem necessidade. Vale para 429/403 (cota) e para 5xx esgotado
+            # (congestao daquele projeto).
             falhas.append(f"{nome}: HTTP {e.codigo}")
             print(f"[analisevideo] {nome} recusou (HTTP {e.codigo}) — "
                   f"tentando a proxima chave", file=sys.stderr, flush=True)

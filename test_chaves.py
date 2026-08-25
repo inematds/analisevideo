@@ -92,10 +92,22 @@ def test_congestao_espera_e_NAO_troca(monkeypatch, video):
     assert len(chamadas) == 3          # esperou e insistiu na MESMA chave
 
 
-def test_congestao_que_nunca_passa_nao_vira_troca_de_chave(monkeypatch, video):
+def test_congestao_que_NAO_passa_vira_troca_de_chave(monkeypatch, video):
+    """503 esgotado troca de chave — porque o 503 do Gemini e POR PROJETO.
+
+    Medido em 2026-08-24: no mesmo minuto, GOOGLE_API_KEY e GEMINI_API_KEY
+    responderam e as duas GEMINI_API_KEY_INEMACCBOT_* devolveram 503. O codigo
+    insistia 6 vezes com a chave lotada (5,5 min) e desistia com duas chaves
+    boas na lista, nunca tentadas — foi assim que os jobs 5156/5158/5159
+    morreram com o video ja baixado e comprimido.
+
+    A espera continua vindo primeiro (`test_congestao_espera_e_NAO_troca`): a
+    congestao costuma passar, e trocar de chave na primeira tentativa jogaria
+    fora o upload feito para o projeto daquela chave.
+    """
     monkeypatch.setattr(urllib.request, "urlopen",
                         lambda *a, **k: (_ for _ in ()).throw(_erro(503)))
-    with pytest.raises(urllib.error.HTTPError):
+    with pytest.raises(analisa.CotaOuBloqueio):
         analisa.tentar_com("k", video, "video/mp4", 10, "ctx", (1,))
 
 
