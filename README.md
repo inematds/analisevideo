@@ -134,3 +134,26 @@ trocaria uma falha intermitente por uma permanente.
 análise que o Gemini não fez.
 
 Sem `OPENROUTER_API_KEY`, tudo funciona como antes — a reserva é opcional.
+
+
+## Reprocessar sem baixar de novo
+
+O slug vem do TÍTULO, e o Facebook devolve "Facebook" para todo link — então
+cada tentativa criava `facebook-2`, `-3`, `-4`… e baixava tudo outra vez. Em
+2026-08-24 o MESMO clipe foi baixado **quatro vezes** (141 MB de rede e disco)
+por um erro de cota que não tinha nada a ver com o download.
+
+Agora a **URL é a identidade**: se já houver uma pasta com aquela url e o
+arquivo ainda no disco, ela é reusada — download e compressão são pulados. E a
+versão comprimida (`analise-src.mp4`), se existir, também é reaproveitada.
+
+Duas consequências práticas:
+
+- **Repetir `analisa <url>` depois de um erro é barato** — vai direto para a
+  análise. É o caminho para reprocessar o que falhou por cota.
+- **`--keep-src` passa a valer a pena** em vídeo que você pode querer reanalisar
+  (com `--prompt` diferente, por exemplo). Sem ele, o arquivo é apagado no fim e
+  a próxima análise baixa de novo.
+
+Passar um `slug` explícito desliga o reuso: ali você está dizendo qual pasta
+quer, e adivinhar outra seria pior.

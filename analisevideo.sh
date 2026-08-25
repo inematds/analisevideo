@@ -43,6 +43,25 @@ perfil_firefox() {
   done
 }
 
+# O MESMO video ja baixado antes? Reusa a pasta em vez de baixar de novo.
+#
+# O slug vem do TITULO, e o Facebook devolve "Facebook" para todo link: cada
+# tentativa criava `facebook-2`, `-3`, `-4`... e baixava os 41 MB outra vez.
+# Em 2026-08-24 o MESMO clipe foi baixado QUATRO vezes (facebook-4 a -7), 141 MB
+# de rede e disco por um erro de cota que nao tinha nada a ver com o download.
+#
+# A URL e a identidade. Se houver pasta com esta url e o arquivo ainda no disco,
+# ela e reusada — o download e a compressao (o passo caro) sao pulados.
+pasta_com_a_url() {
+  local url="$1" m arq
+  for m in "$BANCO"/*/meta.json; do
+    [ -f "$m" ] || continue
+    [ "$(jq -r '.url // ""' "$m" 2>/dev/null)" = "$url" ] || continue
+    arq="$(jq -r '.arquivo // ""' "$m" 2>/dev/null)"
+    [ -n "$arq" ] && [ -f "$arq" ] && { dirname "$m"; return; }
+  done
+}
+
 # As flags de download para ESTA url. Ecoa nada quando não há o que acrescentar.
 flags_do_site() {
   local url="$1" perfil
@@ -131,6 +150,12 @@ analisa|prep)
     TITULO="$(yt-dlp --no-warnings "${FLAGS[@]}" --print '%(title)s' --skip-download "$URL" 2>/dev/null | head -1)"
     UPLOADER="$(yt-dlp --no-warnings "${FLAGS[@]}" --print '%(uploader)s' --skip-download "$URL" 2>/dev/null | head -1)"
     DATA="$(yt-dlp --no-warnings "${FLAGS[@]}" --print '%(upload_date)s' --skip-download "$URL" 2>/dev/null | head -1)"
+    REUSO="$(pasta_com_a_url "$URL")"
+    if [ -n "$REUSO" ] && [ -z "$SLUG" ]; then
+      DIR="$REUSO"; SLUG="$(basename "$DIR")"
+      FILE="$(jq -r '.arquivo' "$DIR/meta.json")"
+      echo "[analisevideo] este video ja estava baixado em $SLUG — reusando (sem baixar de novo)" >&2
+    else
     [ -z "$SLUG" ] && SLUG="$(mk_slug "${TITULO:-video}")"
     DIR="$BANCO/$SLUG"; mkdir -p "$DIR"
     echo "[analisevideo] baixando (<=${MAX_H}p)..." >&2
@@ -139,6 +164,7 @@ analisa|prep)
       --merge-output-format mp4 -o "$DIR/fonte.%(ext)s" "$URL" >&2 \
       || die "download falhou (yt-dlp). Se for site logado, confira a sessao no Firefox (ou baixe manual e passe o path)."
     FILE="$(ls -1 "$DIR"/fonte.* 2>/dev/null | head -1)"
+    fi
   else
     [ -f "$SRC" ] || die "arquivo nao existe: $SRC"
     TITULO="$(basename "$SRC")"
@@ -159,8 +185,12 @@ analisa|prep)
   if [ "$BYTES" -gt 18874368 ]; then
     echo "[analisevideo] arquivo grande (${BYTES}B), comprimindo pra analise..." >&2
     ENVIA="$DIR/analise-src.mp4"
+    if [ -s "$ENVIA" ]; then
+      echo "[analisevideo] versao comprimida ja existe — reusando" >&2
+    else
     ffmpeg -y -v error -i "$FILE" -vf "scale=-2:360" -r 12 -c:v libx264 -crf 30 -preset veryfast \
       -c:a aac -b:a 64k "$ENVIA" </dev/null >&2 || ENVIA="$FILE"
+    fi
   fi
 
   # titulo vem de fora (aspas, acentos, barras): so por argv, nunca interpolado.

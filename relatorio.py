@@ -98,7 +98,35 @@ def main() -> int:
     o.append(f"- Estrutura: {n.get('estrutura', '-')} · arco: {n.get('arco', '-')}")
     o.append(f"- CTA: {n.get('cta', '-')}")
 
+    # REFAZER SEMELHANTE: os dois prompts que importam, juntos e no topo do
+    # bloco de reproducao.
+    #
+    # O `prompt_musica` ja era pedido no PROMPT e vinha preenchido no JSON —
+    # so nunca aparecia no relatorio, que e o que a pessoa le. Ele ficava
+    # enterrado em `audio`, e quem quisesse refazer a musica tinha que abrir o
+    # `.json` para achar. Pedido do dono em 2026-08-24.
+    au_p = (a.get("audio") or {}).get("prompt_musica")
     r = a.get("reproduzir") or {}
+    clipe_p = r.get("prompt_gerador_video")
+    if au_p or clipe_p:
+        o.append("\n## Refazer semelhante")
+        if au_p:
+            o.append("\n**Música** (Suno/Udio — cole como está):")
+            o.append(f"> {au_p}")
+            neg = (a.get("audio") or {}).get("negativo_musica")
+            if neg:
+                o.append(f"\nNegativo: `{neg}`")
+        if clipe_p:
+            o.append("\n**Clipe** (o trecho mais forte, para gerador de vídeo):")
+            o.append(f"> {clipe_p}")
+        # A LINHA PRONTA para o bot: quem quer refazer nao quer montar comando,
+        # quer colar. O `--estilo` fica de fora de proposito — o estilo esta
+        # descrito dentro do proprio prompt, e um id de catalogo brigaria com ele.
+        if au_p:
+            uma_linha = " ".join(str(au_p).split())
+            o.append("\n**No bot, de uma vez:**")
+            o.append(f"```\nmusicavideo: {uma_linha}\n```")
+
     o.append(f"\n## Como refazer (dificuldade: {r.get('dificuldade', '-')})")
     o.append(f"- Equipamento: {lista(r.get('equipamento_minimo'))}")
     for i, passo in enumerate(r.get("passos") or [], 1):
