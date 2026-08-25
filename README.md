@@ -110,7 +110,23 @@ perfil:
 — para os sites públicos continua funcionando.
 
 
-## Reserva: quando o Gemini recusa tudo
+## Ordem dos motores (2026-08-25: a reserva vai na frente)
+
+    stealth/ox-alpha  →  GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS
+
+Decisão do dono, e o motivo está nos números: as três chaves do Gemini estouram
+a cota diária com **~9 análises**, e dali em diante toda análise dependia da
+reserva de qualquer jeito — só que depois de gastar minutos rodando a cascata
+inteira até chegar nela.
+
+Para voltar à ordem antiga, **sem tocar em código**:
+
+    export ANALISEVIDEO_MOTOR=gemini
+
+A troca é uma variável de propósito: o ox-alpha é um modelo em avaliação e pode
+sumir sem aviso; voltar atrás não pode depender de um commit.
+
+## Reserva: quando o motor da frente recusa
 
 O passo caro do `analisa` não é a chamada de API — é o **download e a
 compressão** que vêm antes. Um clipe de 41 MB do Facebook leva minutos para

@@ -233,3 +233,50 @@ def test_reserva_espera_no_429_do_pool_compartilhado(monkeypatch, video):
     monkeypatch.setattr(urllib.request, "urlopen", fake)
     assert analisa.tentar_openrouter(video, "video/mp4", "ctx", (1, 2, 3)) == '{"ok":1}'
     assert len(chamadas) == 3
+
+
+def test_reserva_na_frente_nao_gasta_o_gemini(monkeypatch, video, capsys):
+    """Ordem do dono (2026-08-25): a reserva primeiro, o Gemini como rede.
+
+    Com a cota diaria do Gemini estourando em ~9 analises, toda analise dali em
+    diante dependia da reserva de qualquer jeito — so que depois de rodar a
+    cascata inteira. Invertido, o Gemini nem e tocado quando a reserva responde.
+    """
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.delenv("ANALISEVIDEO_MOTOR", raising=False)
+    tocou_gemini = []
+    monkeypatch.setattr(analisa, "chaves_disponiveis", lambda: [("GOOGLE_API_KEY", "k")])
+    monkeypatch.setattr(analisa, "tentar_com", lambda *a, **k: tocou_gemini.append(1))
+    monkeypatch.setattr(analisa, "tentar_openrouter", lambda *a, **k: '{"resumo":"reserva"}')
+    monkeypatch.setattr(sys, "argv", ["analisa.py", video, "10"])
+    assert analisa.main() == 0
+    saida = json.loads(capsys.readouterr().out)
+    assert saida["_modelo"] == analisa.OPENROUTER_MODELO
+    assert not tocou_gemini, "o Gemini nao devia ser chamado quando a reserva responde"
+
+
+def test_reserva_falhando_cai_no_gemini(monkeypatch, video, capsys):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.setattr(analisa, "chaves_disponiveis", lambda: [("GOOGLE_API_KEY", "k")])
+    monkeypatch.setattr(analisa, "tentar_openrouter",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("pool cheio")))
+    monkeypatch.setattr(analisa, "tentar_com", lambda *a, **k: '{"resumo":"gemini"}')
+    monkeypatch.setattr(sys, "argv", ["analisa.py", video, "10"])
+    assert analisa.main() == 0
+    saida = json.loads(capsys.readouterr().out)
+    assert saida["resumo"] == "gemini"
+    assert saida["_modelo"] == analisa.MODEL
+
+
+def test_ANALISEVIDEO_MOTOR_gemini_devolve_a_ordem_antiga(monkeypatch, video, capsys):
+    """A troca e uma VARIAVEL, nao uma reescrita: um modelo em avaliacao pode
+    sumir sem aviso, e voltar atras nao pode depender de um commit."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.setenv("ANALISEVIDEO_MOTOR", "gemini")
+    monkeypatch.setattr(analisa, "chaves_disponiveis", lambda: [("GOOGLE_API_KEY", "k")])
+    monkeypatch.setattr(analisa, "tentar_com", lambda *a, **k: '{"resumo":"gemini"}')
+    monkeypatch.setattr(analisa, "tentar_openrouter",
+                        lambda *a, **k: pytest.fail("nao devia tocar a reserva"))
+    monkeypatch.setattr(sys, "argv", ["analisa.py", video, "10"])
+    assert analisa.main() == 0
+    assert json.loads(capsys.readouterr().out)["_modelo"] == analisa.MODEL

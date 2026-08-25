@@ -319,10 +319,39 @@ def main() -> int:
     # o trabalho caro estava feito e o que faltava era esperar.
     ESPERAS = (20, 40, 60, 90, 120)
 
+    modelo_usado = MODEL
     raw = None
     usada = None
     falhas = []
+
+    # QUEM VAI NA FRENTE. Decisao do dono em 2026-08-25: a reserva primeiro.
+    #
+    # O motivo e simples de ver nos numeros do dia anterior: as tres chaves do
+    # Gemini estouraram a cota diaria com NOVE analises, e a partir dali toda
+    # analise dependia da reserva de qualquer jeito — so que depois de gastar
+    # minutos rodando a cascata inteira ate chegar nela. Com o ox-alpha na
+    # frente, o Gemini vira o que a reserva era: a rede para quando o outro
+    # falhar.
+    #
+    # O custo assumido: ~2,5x mais lento (229s contra ~90s medidos), e um
+    # modelo em avaliacao que pode sumir sem aviso. Por isso a ordem e uma
+    # VARIAVEL, e nao uma reescrita: `ANALISEVIDEO_MOTOR=gemini` devolve a
+    # ordem antiga sem tocar em codigo.
+    reserva_primeiro = os.environ.get("ANALISEVIDEO_MOTOR", "reserva").strip().lower() != "gemini"
+    if reserva_primeiro and (os.environ.get("OPENROUTER_API_KEY") or "").strip():
+        print(f"[analisevideo] analisando com {OPENROUTER_MODELO}", file=sys.stderr, flush=True)
+        try:
+            raw = tentar_openrouter(path, mime, ctx, ESPERAS)
+            usada = OPENROUTER_MODELO
+            modelo_usado = OPENROUTER_MODELO
+        except Exception as e:
+            falhas.append(f"{OPENROUTER_MODELO}: {e}")
+            print(f"[analisevideo] {OPENROUTER_MODELO} recusou ({e}) — indo para o Gemini",
+                  file=sys.stderr, flush=True)
+
     for nome, key in chaves:
+        if raw is not None:
+            break
         try:
             raw = tentar_com(key, path, mime, size, ctx, ESPERAS)
             usada = nome
@@ -336,8 +365,7 @@ def main() -> int:
             print(f"[analisevideo] {nome} recusou (HTTP {e.codigo}) — "
                   f"tentando a proxima chave", file=sys.stderr, flush=True)
             continue
-    modelo_usado = MODEL
-    if raw is None:
+    if raw is None and not reserva_primeiro:
         # O video ja esta baixado e comprimido: desistir aqui joga fora o passo
         # caro. A reserva e a diferenca entre "falhou" e "saiu mais devagar".
         print("[analisevideo] Gemini indisponivel em todas as chaves — indo para "
@@ -349,8 +377,10 @@ def main() -> int:
         except Exception as e:
             falhas.append(f"reserva {OPENROUTER_MODELO}: {e}")
     if raw is None:
-        print(json.dumps({"erro": "todas as chaves do Gemini falharam por cota ou "
-                                  "bloqueio, e a reserva tambem — " + "; ".join(falhas)},
+        # Nomear QUEM falhou e por que: "nao deu" manda o dono adivinhar entre
+        # cota, bloqueio e provedor fora do ar — tres acoes diferentes.
+        print(json.dumps({"erro": "nenhum motor respondeu (reserva e Gemini) — cota, "
+                                  "bloqueio ou indisponibilidade: " + "; ".join(falhas)},
                          ensure_ascii=False))
         return 1
     if chaves and usada != chaves[0][0]:
