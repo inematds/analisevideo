@@ -70,18 +70,26 @@ flags_do_site() {
 # propria. Carregar so uma aqui anularia essa rede — foi por isso que a lista
 # saiu do shell e virou responsabilidade do Python.
 CHAVES_GEMINI="GOOGLE_API_KEY GEMINI_API_KEY GEMINI_API_KEY_INEMACCBOT_TIME GEMINI_API_KEY_INEMACCBOT_PROMPTS"
+# A chave da RESERVA (OpenRouter). Sem ela o analisa.py so avisa e falha como
+# antes — a reserva e opcional de proposito: ela existe para o dia em que as
+# quatro chaves do Gemini recusam com o video ja baixado e comprimido.
+CHAVES_RESERVA="OPENROUTER_API_KEY"
 
 load_key() {
   local achou=0 nome v f
-  for nome in $CHAVES_GEMINI; do
-    [ -n "$(eval echo "\${$nome:-}")" ] && { achou=1; continue; }
+  for nome in $CHAVES_GEMINI $CHAVES_RESERVA; do
+    [ -n "$(eval echo "\${$nome:-}")" ] && { case " $CHAVES_GEMINI " in *" $nome "*) achou=1 ;; esac; continue; }
     for f in "$ROOT/.env" "$HOME/projetos/wifi/.env"; do
       [ -f "$f" ] || continue
       v="$(grep -m1 "^$nome=" "$f" | cut -d= -f2- | tr -d '"'"'"' \r')"
-      [ -n "$v" ] && { export "$nome=$v"; achou=1; break; }
+      # A RESERVA nao conta como "achou": ela e rede, nao motor. Sem Gemini
+      # nenhum o `analisa.py` ainda roda (vai direto para a reserva), mas quem
+      # perdeu as quatro chaves precisa saber disso, e nao descobrir por um
+      # tempo de analise tres vezes maior.
+      [ -n "$v" ] && { export "$nome=$v"; case " $CHAVES_GEMINI " in *" $nome "*) achou=1 ;; esac; break; }
     done
   done
-  [ "$achou" = 1 ] || die "nenhuma chave do Gemini encontrada (.env do openpcbotv2 ou do wifi)"
+  [ "$achou" = 1 ] || echo "[analisevideo] aviso: nenhuma chave do Gemini (.env do repo ou do wifi) — vai direto para a reserva" >&2
 }
 
 slugify() {

@@ -108,3 +108,29 @@ perfil:
 
 **Sem Firefox na máquina** (VPS), o download segue sem cookies e avisa no stderr
 — para os sites públicos continua funcionando.
+
+
+## Reserva: quando o Gemini recusa tudo
+
+O passo caro do `analisa` não é a chamada de API — é o **download e a
+compressão** que vêm antes. Um clipe de 41 MB do Facebook leva minutos para
+chegar até ali. Em 2026-08-24, três chaves distintas do Gemini responderam 429
+no mesmo minuto e esse trabalho todo foi jogado fora.
+
+Por isso existe a reserva. A ordem é:
+
+    GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS → stealth/ox-alpha
+
+O `stealth/ox-alpha` (OpenRouter, `OPENROUTER_API_KEY` no `wifi/.env`) aceita
+vídeo e devolve o MESMO JSON — o prompt não muda em nada. Medido: 6,6 MB → 27k
+tokens, 229s, 16 chaves, custo zero.
+
+Ele fica ATRÁS de propósito: é ~2,5× mais lento que o Gemini, o 429 dele é um
+pool compartilhado entre todos os usuários do OpenRouter, e é um modelo em
+avaliação — pode sumir sem aviso. Como rede, vale muito; como motor único,
+trocaria uma falha intermitente por uma permanente.
+
+`_modelo` no JSON registra QUEM analisou: sem isso o banco diria Gemini para uma
+análise que o Gemini não fez.
+
+Sem `OPENROUTER_API_KEY`, tudo funciona como antes — a reserva é opcional.

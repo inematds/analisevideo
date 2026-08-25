@@ -237,6 +237,59 @@ def tentar_com(key: str, path: str, mime: str, size: int, ctx: str, esperas) -> 
     raise RuntimeError("Gemini nao respondeu depois de todas as esperas")
 
 
+
+# ---------------------------------------------------------------- reserva
+# Quando TODAS as chaves do Gemini recusam, o que se perde nao e uma chamada de
+# API: e o download e a compressao que ja foram feitos (o clipe do Facebook de
+# 41 MB levou minutos so para chegar aqui). Foi o que aconteceu em 2026-08-24 —
+# tres chaves distintas em 429 no mesmo minuto, com o video pronto no disco.
+#
+# O `stealth/ox-alpha` do OpenRouter aceita VIDEO (medido: 6,6 MB -> 27k tokens,
+# 229s, JSON valido com as 16 chaves que este prompt pede, custo zero). E mais
+# lento que o Gemini e nao tem SLA — e um modelo em avaliacao, que pode sumir —
+# entao ele fica ATRAS, como rede, e nunca na frente.
+OPENROUTER_MODELO = os.environ.get("OPENROUTER_VIDEO_MODEL", "stealth/ox-alpha")
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+def tentar_openrouter(path: str, mime: str, ctx: str, esperas) -> str:
+    """A analise pelo motor de reserva. Levanta se nao houver chave ou se falhar.
+
+    O 429 daqui NAO e cota nossa: e `rate-limited upstream`, um pool
+    compartilhado entre todos os usuarios do OpenRouter. Passa sozinho — por
+    isso espera e insiste, em vez de desistir.
+    """
+    key = (os.environ.get("OPENROUTER_API_KEY") or "").strip()
+    if not key:
+        raise RuntimeError("sem OPENROUTER_API_KEY")
+    data = "data:%s;base64,%s" % (mime, base64.b64encode(open(path, "rb").read()).decode())
+    body = {
+        "model": OPENROUTER_MODELO,
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": PROMPT + "\n\n" + ctx},
+            {"type": "video_url", "video_url": {"url": data}},
+        ]}],
+        "response_format": {"type": "json_object"},
+    }
+    for tentativa in range(len(esperas) + 1):
+        req = urllib.request.Request(
+            OPENROUTER_URL, data=json.dumps(body).encode(),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=900) as r:
+                return json.load(r)["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as e:
+            if e.code in (429,) + ESPERA_E_TENTA and tentativa < len(esperas):
+                espera = esperas[tentativa]
+                print(f"[analisevideo] reserva {e.code} — esperando {espera}s "
+                      f"(tentativa {tentativa + 1}/{len(esperas) + 1})",
+                      file=sys.stderr, flush=True)
+                time.sleep(espera)
+                continue
+            raise
+
+
 def main() -> int:
     path = sys.argv[1]
     dur = float(sys.argv[2] or 0)
@@ -245,9 +298,10 @@ def main() -> int:
         meta = json.load(open(sys.argv[3]))
 
     chaves = chaves_disponiveis()
-    if not chaves:
-        print(json.dumps({"erro": "nenhuma chave do Gemini encontrada "
-                                  "(GOOGLE_API_KEY, GEMINI_API_KEY, GEMINI_API_KEY_*)"}))
+    if not chaves and not (os.environ.get("OPENROUTER_API_KEY") or "").strip():
+        print(json.dumps({"erro": "nenhuma chave encontrada — Gemini "
+                                  "(GOOGLE_API_KEY, GEMINI_API_KEY, GEMINI_API_KEY_*) "
+                                  "nem reserva (OPENROUTER_API_KEY)"}))
         return 1
 
     mime = mimetypes.guess_type(path)[0] or "video/mp4"
@@ -282,16 +336,29 @@ def main() -> int:
             print(f"[analisevideo] {nome} recusou (HTTP {e.codigo}) — "
                   f"tentando a proxima chave", file=sys.stderr, flush=True)
             continue
+    modelo_usado = MODEL
+    if raw is None:
+        # O video ja esta baixado e comprimido: desistir aqui joga fora o passo
+        # caro. A reserva e a diferenca entre "falhou" e "saiu mais devagar".
+        print("[analisevideo] Gemini indisponivel em todas as chaves — indo para "
+              f"a reserva ({OPENROUTER_MODELO})", file=sys.stderr, flush=True)
+        try:
+            raw = tentar_openrouter(path, mime, ctx, ESPERAS)
+            usada = OPENROUTER_MODELO
+            modelo_usado = OPENROUTER_MODELO
+        except Exception as e:
+            falhas.append(f"reserva {OPENROUTER_MODELO}: {e}")
     if raw is None:
         print(json.dumps({"erro": "todas as chaves do Gemini falharam por cota ou "
-                                  "bloqueio — " + "; ".join(falhas)}, ensure_ascii=False))
+                                  "bloqueio, e a reserva tambem — " + "; ".join(falhas)},
+                         ensure_ascii=False))
         return 1
-    if usada != chaves[0][0]:
+    if chaves and usada != chaves[0][0]:
         print(f"[analisevideo] analise feita com {usada}", file=sys.stderr, flush=True)
 
     out = json.loads(raw)
     out["_fonte"] = meta
-    out["_modelo"] = MODEL
+    out["_modelo"] = modelo_usado
     out["_duracao_s"] = dur
     print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0

@@ -34,6 +34,21 @@ def _resposta(texto="{}"):
     return R()
 
 
+def _resposta_or(texto="{}"):
+    """A MESMA casca, no formato do OpenRouter: `choices[].message.content`."""
+    class R:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": texto}}]}).encode()
+
+    return R()
+
+
 @pytest.fixture(autouse=True)
 def sem_espera(monkeypatch):
     monkeypatch.setattr(analisa.time, "sleep", lambda *_: None)
@@ -169,3 +184,52 @@ def test_main_sem_chave_nenhuma(monkeypatch, video, capsys):
     monkeypatch.setattr(sys, "argv", ["analisa.py", video, "12"])
     assert analisa.main() == 1
     assert "nenhuma chave" in json.loads(capsys.readouterr().out)["erro"]
+
+
+# ---------------------------------------------------------------- reserva
+# O que se perde quando o Gemini recusa TODAS as chaves nao e uma chamada de
+# API: e o download e a compressao ja feitos. Em 2026-08-24 um clipe de 41 MB do
+# Facebook levou minutos para chegar na analise e morreu com tres chaves em 429.
+
+def test_reserva_entra_quando_o_gemini_inteiro_recusa(monkeypatch, video, capsys):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.setattr(analisa, "chaves_disponiveis", lambda: [("GOOGLE_API_KEY", "k")])
+    monkeypatch.setattr(analisa, "tentar_com",
+                        lambda *a, **k: (_ for _ in ()).throw(analisa.CotaOuBloqueio(429)))
+    monkeypatch.setattr(analisa, "tentar_openrouter",
+                        lambda *a, **k: '{"resumo":"veio da reserva"}')
+    monkeypatch.setattr(sys, "argv", ["analisa.py", video, "10"])
+    assert analisa.main() == 0
+    saida = json.loads(capsys.readouterr().out)
+    assert saida["resumo"] == "veio da reserva"
+    # O modelo REGISTRADO tem que ser o que analisou — senao o banco diz Gemini
+    # para uma analise que o Gemini nao fez.
+    assert saida["_modelo"] == analisa.OPENROUTER_MODELO
+
+
+def test_sem_reserva_configurada_falha_como_antes(monkeypatch, video, capsys):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setattr(analisa, "chaves_disponiveis", lambda: [("GOOGLE_API_KEY", "k")])
+    monkeypatch.setattr(analisa, "tentar_com",
+                        lambda *a, **k: (_ for _ in ()).throw(analisa.CotaOuBloqueio(429)))
+    monkeypatch.setattr(sys, "argv", ["analisa.py", video, "10"])
+    assert analisa.main() == 1
+    assert "429" in capsys.readouterr().out
+
+
+def test_reserva_espera_no_429_do_pool_compartilhado(monkeypatch, video):
+    """O 429 da reserva nao e cota nossa: e `rate-limited upstream`, um pool
+    compartilhado que passa sozinho. Desistir nele seria desistir cedo demais."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.setattr(analisa.time, "sleep", lambda *_: None)
+    chamadas = []
+
+    def fake(*a, **k):
+        chamadas.append(1)
+        if len(chamadas) < 3:
+            raise _erro(429)
+        return _resposta_or('{"ok":1}')
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    assert analisa.tentar_openrouter(video, "video/mp4", "ctx", (1, 2, 3)) == '{"ok":1}'
+    assert len(chamadas) == 3
