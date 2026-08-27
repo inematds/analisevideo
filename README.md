@@ -110,21 +110,19 @@ perfil:
 — para os sites públicos continua funcionando.
 
 
-## Ordem dos motores (2026-08-25: a reserva vai na frente)
+## Ordem dos motores (2026-08-26: o Gemini direto vai na frente)
 
-    stealth/ox-alpha  →  GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS
+    GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS  →  google/gemini-3.7-flash
 
-Decisão do dono, e o motivo está nos números: as três chaves do Gemini estouram
-a cota diária com **~9 análises**, e dali em diante toda análise dependia da
-reserva de qualquer jeito — só que depois de gastar minutos rodando a cascata
-inteira até chegar nela.
+Em 2026-08-25 a reserva tinha ido para a frente porque o `stealth/ox-alpha` era
+**grátis** e as três chaves do Gemini estouravam a cota diária com ~9 análises.
+Esse modelo **sumiu do OpenRouter** — era o risco anotado desde o começo. A
+reserva de hoje é paga, então ela volta para trás: gastar crédito com cota do
+Gemini de sobra não faz sentido. Ela entra quando a cota do dia acaba.
 
-Para voltar à ordem antiga, **sem tocar em código**:
+Para inverter (a reserva na frente), **sem tocar em código**:
 
-    export ANALISEVIDEO_MOTOR=gemini
-
-A troca é uma variável de propósito: o ox-alpha é um modelo em avaliação e pode
-sumir sem aviso; voltar atrás não pode depender de um commit.
+    export ANALISEVIDEO_MOTOR=reserva
 
 ## Reserva: quando o motor da frente recusa
 
@@ -135,16 +133,16 @@ no mesmo minuto e esse trabalho todo foi jogado fora.
 
 Por isso existe a reserva. A ordem é:
 
-    GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS → stealth/ox-alpha
+    GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS → google/gemini-3.7-flash
 
-O `stealth/ox-alpha` (OpenRouter, `OPENROUTER_API_KEY` no `wifi/.env`) aceita
-vídeo e devolve o MESMO JSON — o prompt não muda em nada. Medido: 6,6 MB → 27k
-tokens, 229s, 16 chaves, custo zero.
+O `google/gemini-3.7-flash` (OpenRouter, `OPENROUTER_API_KEY` no `wifi/.env`)
+aceita vídeo e devolve o MESMO JSON — o prompt não muda em nada. É o mesmo motor
+do caminho principal por outra porta: quando as chaves do Google estouram a cota
+do dia, a cota do OpenRouter é outra.
 
-Ele fica ATRÁS de propósito: é ~2,5× mais lento que o Gemini, o 429 dele é um
-pool compartilhado entre todos os usuários do OpenRouter, e é um modelo em
-avaliação — pode sumir sem aviso. Como rede, vale muito; como motor único,
-trocaria uma falha intermitente por uma permanente.
+Ele fica ATRÁS de propósito: **é pago**. Sempre que ele responde, o `analisa`
+avisa no stderr (`ATENCAO: ... reserva paga`) — motor pago não roda calado.
+Para trocar o modelo da reserva, `OPENROUTER_VIDEO_MODEL`.
 
 `_modelo` no JSON registra QUEM analisou: sem isso o banco diria Gemini para uma
 análise que o Gemini não fez.

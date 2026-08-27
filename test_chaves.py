@@ -235,15 +235,31 @@ def test_reserva_espera_no_429_do_pool_compartilhado(monkeypatch, video):
     assert len(chamadas) == 3
 
 
-def test_reserva_na_frente_nao_gasta_o_gemini(monkeypatch, video, capsys):
-    """Ordem do dono (2026-08-25): a reserva primeiro, o Gemini como rede.
+def test_por_padrao_o_gemini_vai_na_frente(monkeypatch, video, capsys):
+    """Ordem do dono (2026-08-26): o Gemini direto primeiro, reserva atras.
 
-    Com a cota diaria do Gemini estourando em ~9 analises, toda analise dali em
-    diante dependia da reserva de qualquer jeito — so que depois de rodar a
-    cascata inteira. Invertido, o Gemini nem e tocado quando a reserva responde.
+    A reserva de hoje e paga (`google/gemini-3.7-flash` pelo OpenRouter, o
+    `ox-alpha` gratis sumiu): poe-la na frente gastaria credito tendo cota do
+    Gemini de sobra. Sem `ANALISEVIDEO_MOTOR`, ela nao e sequer tocada.
     """
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
     monkeypatch.delenv("ANALISEVIDEO_MOTOR", raising=False)
+    tocou_reserva = []
+    monkeypatch.setattr(analisa, "chaves_disponiveis", lambda: [("GOOGLE_API_KEY", "k")])
+    monkeypatch.setattr(analisa, "tentar_com", lambda *a, **k: '{"resumo":"gemini"}')
+    monkeypatch.setattr(analisa, "tentar_openrouter",
+                        lambda *a, **k: tocou_reserva.append(1) or '{"resumo":"reserva"}')
+    monkeypatch.setattr(sys, "argv", ["analisa.py", video, "10"])
+    assert analisa.main() == 0
+    saida = json.loads(capsys.readouterr().out)
+    assert saida["_modelo"] == analisa.MODEL
+    assert not tocou_reserva, "a reserva e paga: nao se toca nela com o Gemini de pe"
+
+
+def test_reserva_na_frente_quando_pedida_nao_gasta_o_gemini(monkeypatch, video, capsys):
+    """`ANALISEVIDEO_MOTOR=reserva` inverte a ordem sem tocar em codigo."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.setenv("ANALISEVIDEO_MOTOR", "reserva")
     tocou_gemini = []
     monkeypatch.setattr(analisa, "chaves_disponiveis", lambda: [("GOOGLE_API_KEY", "k")])
     monkeypatch.setattr(analisa, "tentar_com", lambda *a, **k: tocou_gemini.append(1))
@@ -280,3 +296,20 @@ def test_ANALISEVIDEO_MOTOR_gemini_devolve_a_ordem_antiga(monkeypatch, video, ca
     monkeypatch.setattr(sys, "argv", ["analisa.py", video, "10"])
     assert analisa.main() == 0
     assert json.loads(capsys.readouterr().out)["_modelo"] == analisa.MODEL
+
+
+def test_reserva_sempre_avisa_no_stderr(monkeypatch, video, capsys):
+    """Motor pago e nao-padrao: quem le o terminal tem de saber que foi ele.
+
+    Antes o unico aviso final era "analise feita com X" gated em `chaves` —
+    sem chave nenhuma do Gemini, a reserva respondia calada.
+    """
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    monkeypatch.delenv("ANALISEVIDEO_MOTOR", raising=False)
+    monkeypatch.setattr(analisa, "chaves_disponiveis", lambda: [])
+    monkeypatch.setattr(analisa, "tentar_openrouter", lambda *a, **k: '{"resumo":"reserva"}')
+    monkeypatch.setattr(sys, "argv", ["analisa.py", video, "10"])
+    assert analisa.main() == 0
+    cap = capsys.readouterr()
+    assert json.loads(cap.out)["_modelo"] == analisa.OPENROUTER_MODELO
+    assert analisa.OPENROUTER_MODELO in cap.err and "ATENCAO" in cap.err

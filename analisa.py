@@ -244,11 +244,13 @@ def tentar_com(key: str, path: str, mime: str, size: int, ctx: str, esperas) -> 
 # 41 MB levou minutos so para chegar aqui). Foi o que aconteceu em 2026-08-24 —
 # tres chaves distintas em 429 no mesmo minuto, com o video pronto no disco.
 #
-# O `stealth/ox-alpha` do OpenRouter aceita VIDEO (medido: 6,6 MB -> 27k tokens,
-# 229s, JSON valido com as 16 chaves que este prompt pede, custo zero). E mais
-# lento que o Gemini e nao tem SLA — e um modelo em avaliacao, que pode sumir —
-# entao ele fica ATRAS, como rede, e nunca na frente.
-OPENROUTER_MODELO = os.environ.get("OPENROUTER_VIDEO_MODEL", "stealth/ox-alpha")
+# 2026-08-26: o `stealth/ox-alpha` SUMIU do OpenRouter — era exatamente o risco
+# que o comentario anterior anotava ("um modelo em avaliacao, que pode sumir").
+# A reserva agora e o `google/gemini-3.7-flash` pelo OpenRouter, que tambem
+# aceita VIDEO (confirmado na listagem de modelos: text/image/video/file/audio).
+# E o mesmo motor do caminho principal por outra porta: quando as chaves do
+# Gemini estouram a cota do dia, a cota do OpenRouter e outra.
+OPENROUTER_MODELO = os.environ.get("OPENROUTER_VIDEO_MODEL", "google/gemini-3.7-flash")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
@@ -324,22 +326,21 @@ def main() -> int:
     usada = None
     falhas = []
 
-    # QUEM VAI NA FRENTE. Decisao do dono em 2026-08-25: a reserva primeiro.
+    # QUEM VAI NA FRENTE. Decisao do dono em 2026-08-26: o Gemini direto
+    # primeiro, a reserva atras — de volta a ordem original.
     #
-    # O motivo e simples de ver nos numeros do dia anterior: as tres chaves do
-    # Gemini estouraram a cota diaria com NOVE analises, e a partir dali toda
-    # analise dependia da reserva de qualquer jeito — so que depois de gastar
-    # minutos rodando a cascata inteira ate chegar nela. Com o ox-alpha na
-    # frente, o Gemini vira o que a reserva era: a rede para quando o outro
-    # falhar.
+    # Em 2026-08-25 a reserva tinha ido para a frente porque o `ox-alpha` era
+    # gratis e as chaves do Gemini estouravam a cota com nove analises. Esse
+    # modelo nao existe mais, e a reserva de hoje (`google/gemini-3.7-flash`
+    # pelo OpenRouter) e paga: por o pago na frente do que ja esta pago seria
+    # gastar credito a toa. Ele entra quando a cota do dia acaba.
     #
-    # O custo assumido: ~2,5x mais lento (229s contra ~90s medidos), e um
-    # modelo em avaliacao que pode sumir sem aviso. Por isso a ordem e uma
-    # VARIAVEL, e nao uma reescrita: `ANALISEVIDEO_MOTOR=gemini` devolve a
-    # ordem antiga sem tocar em codigo.
-    reserva_primeiro = os.environ.get("ANALISEVIDEO_MOTOR", "reserva").strip().lower() != "gemini"
+    # A ordem continua sendo VARIAVEL: `ANALISEVIDEO_MOTOR=reserva` poe a
+    # reserva na frente de novo, sem tocar em codigo.
+    reserva_primeiro = os.environ.get("ANALISEVIDEO_MOTOR", "gemini").strip().lower() != "gemini"
     if reserva_primeiro and (os.environ.get("OPENROUTER_API_KEY") or "").strip():
-        print(f"[analisevideo] analisando com {OPENROUTER_MODELO}", file=sys.stderr, flush=True)
+        print(f"[analisevideo] ATENCAO: analisando com a reserva paga "
+              f"{OPENROUTER_MODELO} (OpenRouter)", file=sys.stderr, flush=True)
         try:
             raw = tentar_openrouter(path, mime, ctx, ESPERAS)
             usada = OPENROUTER_MODELO
@@ -368,8 +369,9 @@ def main() -> int:
     if raw is None and not reserva_primeiro:
         # O video ja esta baixado e comprimido: desistir aqui joga fora o passo
         # caro. A reserva e a diferenca entre "falhou" e "saiu mais devagar".
-        print("[analisevideo] Gemini indisponivel em todas as chaves — indo para "
-              f"a reserva ({OPENROUTER_MODELO})", file=sys.stderr, flush=True)
+        print("[analisevideo] ATENCAO: Gemini indisponivel em todas as chaves — "
+              f"indo para a reserva paga {OPENROUTER_MODELO} (OpenRouter)",
+              file=sys.stderr, flush=True)
         try:
             raw = tentar_openrouter(path, mime, ctx, ESPERAS)
             usada = OPENROUTER_MODELO
@@ -383,7 +385,13 @@ def main() -> int:
                                   "bloqueio ou indisponibilidade: " + "; ".join(falhas)},
                          ensure_ascii=False))
         return 1
-    if chaves and usada != chaves[0][0]:
+    # A reserva e paga e nao e o motor padrao: quando ela responde, o dono tem
+    # de saber SEMPRE — inclusive quando nao havia chave do Gemini nenhuma e o
+    # aviso de troca abaixo ficaria calado.
+    if usada == OPENROUTER_MODELO:
+        print(f"[analisevideo] ATENCAO: analise feita com {OPENROUTER_MODELO} "
+              f"(reserva paga, via OpenRouter)", file=sys.stderr, flush=True)
+    elif chaves and usada != chaves[0][0]:
         print(f"[analisevideo] analise feita com {usada}", file=sys.stderr, flush=True)
 
     out = json.loads(raw)
