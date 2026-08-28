@@ -12,6 +12,15 @@
 # Nao transcreve fala: quem transcreve e a skill inemavox.
 set -uo pipefail
 
+# O ~/.local/bin ENTRA NO PATH. O serviço do bot roda pelo systemd --user, que
+# não o herda — então `yt-dlp` (instalado com pip --user) existia no terminal e
+# sumia no bot, que falhava com "yt-dlp nao instalado" numa máquina onde ele
+# está instalado. Mesma classe do `claude` 2.1.63 vs 2.1.250 do musicavideo.
+case ":$PATH:" in
+  *":$HOME/.local/bin:"*) ;;
+  *) PATH="$HOME/.local/bin:$PATH"; export PATH ;;
+esac
+
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 BANCO="${ANALISEVIDEO_BANCO:-$HOME/projetos/output/analisevideo}"
