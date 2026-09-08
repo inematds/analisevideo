@@ -112,7 +112,7 @@ perfil:
 
 ## Ordem dos motores (2026-08-26: o Gemini direto vai na frente)
 
-    GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS  →  google/gemini-3.7-flash
+    GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS  →  z-ai/glm-5.3-flash
 
 Em 2026-08-25 a reserva tinha ido para a frente porque o `stealth/ox-alpha` era
 **grátis** e as três chaves do Gemini estouravam a cota diária com ~9 análises.
@@ -133,12 +133,19 @@ no mesmo minuto e esse trabalho todo foi jogado fora.
 
 Por isso existe a reserva. A ordem é:
 
-    GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS → google/gemini-3.7-flash
+    GOOGLE_API_KEY → GEMINI_API_KEY → …_TIME → …_PROMPTS → z-ai/glm-5.3-flash
 
-O `google/gemini-3.7-flash` (OpenRouter, `OPENROUTER_API_KEY` no `wifi/.env`)
-aceita vídeo e devolve o MESMO JSON — o prompt não muda em nada. É o mesmo motor
-do caminho principal por outra porta: quando as chaves do Google estouram a cota
-do dia, a cota do OpenRouter é outra.
+O `z-ai/glm-5.3-flash` (OpenRouter, `OPENROUTER_API_KEY` no `wifi/.env`) aceita
+vídeo e devolve o MESMO JSON — o prompt não muda em nada. Entrou em 2026-09-08 no
+lugar do `google/gemini-3.7-flash`: custa ~10x menos (US$ 0,075/M de entrada
+contra 0,75) e, sendo outro provedor, não divide a cota nem a congestão com o
+Gemini da frente.
+
+**Vídeo no OpenRouter exige US$ 1,00 disponíveis NA CHAVE** — não na conta. Uma
+chave com teto (`limit` em openrouter.ai/settings/keys) abaixo disso responde
+`402 … requires at least $1.00 in balance for video` para qualquer vídeo, mesmo
+um clipe de 20 s, enquanto texto passa. Foi assim que a reserva ficou muda de
+2026-08 até 2026-09-08. O `analisa` agora imprime o corpo do erro.
 
 Ele fica ATRÁS de propósito: **é pago**. Sempre que ele responde, o `analisa`
 avisa no stderr (`ATENCAO: ... reserva paga`) — motor pago não roda calado.

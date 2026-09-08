@@ -246,11 +246,15 @@ def tentar_com(key: str, path: str, mime: str, size: int, ctx: str, esperas) -> 
 #
 # 2026-08-26: o `stealth/ox-alpha` SUMIU do OpenRouter — era exatamente o risco
 # que o comentario anterior anotava ("um modelo em avaliacao, que pode sumir").
-# A reserva agora e o `google/gemini-3.7-flash` pelo OpenRouter, que tambem
-# aceita VIDEO (confirmado na listagem de modelos: text/image/video/file/audio).
-# E o mesmo motor do caminho principal por outra porta: quando as chaves do
-# Gemini estouram a cota do dia, a cota do OpenRouter e outra.
-OPENROUTER_MODELO = os.environ.get("OPENROUTER_VIDEO_MODEL", "google/gemini-3.7-flash")
+# A reserva passou a ser o `google/gemini-3.7-flash` pelo OpenRouter, que tambem
+# aceita VIDEO. Quando as chaves do Gemini estouram a cota do dia, a cota do
+# OpenRouter e outra.
+#
+# 2026-09-08: a reserva e o `z-ai/glm-5.3-flash`. Tambem aceita video no
+# OpenRouter (text/image/video na listagem) e custa ~10x menos que o
+# gemini-3.7-flash (US$ 0,075/M de entrada contra 0,75). O Gemini gratuito
+# continua NA FRENTE; o GLM so entra quando as chaves do Google recusam.
+OPENROUTER_MODELO = os.environ.get("OPENROUTER_VIDEO_MODEL", "z-ai/glm-5.3-flash")
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
@@ -289,7 +293,17 @@ def tentar_openrouter(path: str, mime: str, ctx: str, esperas) -> str:
                       file=sys.stderr, flush=True)
                 time.sleep(espera)
                 continue
-            raise
+            # O CORPO da resposta vai junto: um 402 sem ele dizia so "Payment
+            # Required", e a causa real ("requires at least $1.00 in balance for
+            # video" — teto da CHAVE, nao da conta) ficou invisivel por dias
+            # (2026-09-08). Sem o corpo, o dono adivinha entre saldo, chave e
+            # modelo — tres acoes diferentes.
+            corpo = ""
+            try:
+                corpo = e.read().decode("utf-8", "replace")[:300].replace("\n", " ")
+            except Exception:
+                pass
+            raise RuntimeError(f"HTTP {e.code}: {corpo or e.reason}") from None
 
 
 def main() -> int:
@@ -331,8 +345,8 @@ def main() -> int:
     #
     # Em 2026-08-25 a reserva tinha ido para a frente porque o `ox-alpha` era
     # gratis e as chaves do Gemini estouravam a cota com nove analises. Esse
-    # modelo nao existe mais, e a reserva de hoje (`google/gemini-3.7-flash`
-    # pelo OpenRouter) e paga: por o pago na frente do que ja esta pago seria
+    # modelo nao existe mais, e a reserva (hoje o `z-ai/glm-5.3-flash` pelo
+    # OpenRouter) e paga: por o pago na frente do que ja esta pago seria
     # gastar credito a toa. Ele entra quando a cota do dia acaba.
     #
     # A ordem continua sendo VARIAVEL: `ANALISEVIDEO_MOTOR=reserva` poe a
